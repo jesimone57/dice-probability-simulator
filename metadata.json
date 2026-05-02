@@ -1,0 +1,6 @@
+{
+  "name": "Dice Probability Explorer",
+  "description": "Simulate rolling dice to visualize probability distributions.",
+  "requestFramePermissions": [],
+  "majorCapabilities": []
+}
