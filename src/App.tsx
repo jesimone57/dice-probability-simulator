@@ -1,4 +1,5 @@
 import React, { useState, useMemo, useCallback, useEffect } from 'react';
+import { motion } from 'motion/react';
 import {
   ComposedChart,
   Bar,
@@ -67,22 +68,57 @@ export default function App() {
   const [numDice, setNumDice] = useState(2);
   const [numSides, setNumSides] = useState(6);
   const [numRolls, setNumRolls] = useState(1000);
+  const [currentRolls, setCurrentRolls] = useState(0);
   
   const [simulatedFreqs, setSimulatedFreqs] = useState<Record<number, number>>({});
   const [isSimulating, setIsSimulating] = useState(false);
+  const simulationRef = React.useRef<{ cancel: boolean }>({ cancel: false });
 
   const theoretical = useMemo(() => {
     return calculateTheoreticalProbabilities(numDice, numSides);
   }, [numDice, numSides]);
 
   const runSimulation = useCallback(() => {
+    simulationRef.current.cancel = true; // Cancel any previous
+    const currentSim = { cancel: false };
+    simulationRef.current = currentSim;
+
     setIsSimulating(true);
-    // Use timeout to allow UI update before heavy computation starts
-    setTimeout(() => {
-      const freqs = simulateRolls(numDice, numSides, numRolls);
-      setSimulatedFreqs(freqs);
-      setIsSimulating(false);
-    }, 10);
+    setSimulatedFreqs({});
+    setCurrentRolls(0);
+
+    // Dynamic chunking based on total rolls: at least 30 frames, at most 120 frames
+    const targetFrames = Math.min(120, Math.max(30, Math.floor(numRolls / 50)));
+    const rollsPerChunk = Math.max(1, Math.floor(numRolls / targetFrames));
+    
+    let rollsCompleted = 0;
+    let currentFreqs: Record<number, number> = {};
+
+    const simulateChunk = () => {
+      if (currentSim.cancel) return;
+
+      const rollsToRun = Math.min(rollsPerChunk, numRolls - rollsCompleted);
+      
+      for (let i = 0; i < rollsToRun; i++) {
+        let sum = 0;
+        for (let d = 0; d < numDice; d++) {
+          sum += Math.floor(Math.random() * numSides) + 1;
+        }
+        currentFreqs[sum] = (currentFreqs[sum] || 0) + 1;
+      }
+      
+      rollsCompleted += rollsToRun;
+      setSimulatedFreqs({...currentFreqs});
+      setCurrentRolls(rollsCompleted);
+
+      if (rollsCompleted < numRolls) {
+        requestAnimationFrame(simulateChunk);
+      } else {
+        setIsSimulating(false);
+      }
+    };
+
+    requestAnimationFrame(simulateChunk);
   }, [numDice, numSides, numRolls]);
 
   // Run initial simulation and re-run when parameters change
@@ -95,7 +131,7 @@ export default function App() {
     for (let sum = numDice; sum <= numDice * numSides; sum++) {
       const theoProb = theoretical[sum] || 0;
       const simFreq = simulatedFreqs[sum] || 0;
-      const simProb = simFreq / Math.max(numRolls, 1);
+      const simProb = simFreq / Math.max(currentRolls, 1);
       data.push({
         sum,
         theoretical: theoProb * 100, // as percentage
@@ -104,25 +140,26 @@ export default function App() {
       });
     }
     return data;
-  }, [numDice, numSides, numRolls, theoretical, simulatedFreqs]);
+  }, [numDice, numSides, currentRolls, theoretical, simulatedFreqs]);
 
   const expectedMean = (numDice * (numSides + 1)) / 2;
   const simulatedMean = useMemo(() => {
     let totalSum = 0;
     for (const [sum, freq] of Object.entries(simulatedFreqs)) {
-      totalSum += Number(sum) * freq;
+      totalSum += Number(sum) * (freq as number);
     }
-    return numRolls > 0 ? totalSum / numRolls : 0;
-  }, [simulatedFreqs, numRolls]);
+    return currentRolls > 0 ? totalSum / currentRolls : 0;
+  }, [simulatedFreqs, currentRolls]);
 
   const mostCommonSimulated = useMemo(() => {
     let maxFreq = 0;
     let modes: string[] = [];
     for (const [sumStr, freq] of Object.entries(simulatedFreqs)) {
-      if (freq > maxFreq) {
-        maxFreq = freq;
+      const f = freq as number;
+      if (f > maxFreq) {
+        maxFreq = f;
         modes = [sumStr];
-      } else if (freq === maxFreq) {
+      } else if (f === maxFreq) {
         modes.push(sumStr);
       }
     }
@@ -135,11 +172,20 @@ export default function App() {
       {/* Header Section */}
       <header className="h-16 bg-white border-b border-slate-200 px-6 flex items-center justify-between shrink-0">
         <div className="flex items-center gap-3">
-          <div className="w-8 h-8 bg-indigo-600 rounded flex items-center justify-center text-white font-bold">
-            <svg xmlns="http://www.w3.org/2000/svg" className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 7v10c0 2.21 3.582 4 8 4s8-1.79 8-4V7M4 7c0 2.21 3.582 4 8 4s8-1.79 8-4M4 7c0-2.21 3.582-4 8-4s8 1.79 8 4m0 5c0 2.21-3.582 4-8 4s-8-1.79-8-4" />
-            </svg>
-          </div>
+          <motion.div 
+            animate={{ 
+              rotate: isSimulating ? [0, 90, 180, 270, 360] : 0, 
+              scale: isSimulating ? [1, 1.1, 1] : 1 
+            }} 
+            transition={{ 
+              repeat: isSimulating ? Infinity : 0, 
+              duration: 0.8, 
+              ease: 'linear' 
+            }}
+            className="w-8 h-8 bg-indigo-600 rounded flex items-center justify-center text-white font-bold"
+          >
+            <Dices className="w-5 h-5" />
+          </motion.div>
           <h1 className="text-xl font-semibold tracking-tight">Probability Engine <span className="text-slate-400 font-normal">| Dice Simulator</span></h1>
         </div>
         <div className="flex items-center gap-4 hidden sm:flex">
@@ -275,6 +321,7 @@ export default function App() {
                     fill="#c7d2fe"
                     radius={[2, 2, 0, 0]} 
                     maxBarSize={60}
+                    isAnimationActive={!isSimulating}
                     animationDuration={500}
                   />
                   <Line 
@@ -285,6 +332,7 @@ export default function App() {
                     strokeWidth={2}
                     dot={false}
                     activeDot={{ r: 6, fill: '#4f46e5', stroke: '#fff', strokeWidth: 2 }}
+                    isAnimationActive={!isSimulating}
                     animationDuration={500}
                   />
                 </ComposedChart>
